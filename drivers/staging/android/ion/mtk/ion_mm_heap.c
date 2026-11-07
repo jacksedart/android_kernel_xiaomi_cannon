@@ -426,6 +426,10 @@ static int ion_mm_heap_allocate(struct ion_heap *heap,
 	buffer_info = kzalloc(sizeof(*buffer_info), GFP_KERNEL);
 	if (IS_ERR_OR_NULL(buffer_info)) {
 		IONMSG(" %s: Error. alloc ion_buffer failed.\n", __func__);
+		/* The pages list is empty; ownership is now in the sg table. */
+		for_each_sg(table->sgl, sg, table->nents, i)
+			free_buffer_page(sys_heap, buffer, sg_page(sg),
+					 get_order(sg->length));
 		goto err1;
 	}
 
