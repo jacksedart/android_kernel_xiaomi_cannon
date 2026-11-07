@@ -641,18 +641,31 @@ static int ion_mm_heap_shrink(struct ion_heap *heap, gfp_t gfp_mask,
 {
 	struct ion_system_heap *sys_heap;
 	int nr_total = 0;
-	int i;
+	int i, nr_freed;
+	bool only_scan = !nr_to_scan;
 
 	sys_heap = container_of(heap, struct ion_system_heap, heap);
 
 	for (i = 0; i < num_orders; i++) {
 		struct ion_page_pool *pool = sys_heap->pools[i];
 
-		nr_total += ion_page_pool_shrink(pool, gfp_mask, nr_to_scan);
-		/* shrink cached pool */
-		nr_total +=
-		    ion_page_pool_shrink(sys_heap->cached_pools[i], gfp_mask,
-					 nr_to_scan);
+		nr_freed = ion_page_pool_shrink(pool, gfp_mask, nr_to_scan);
+		nr_total += nr_freed;
+		if (!only_scan) {
+			nr_to_scan -= nr_freed;
+			if (nr_to_scan <= 0)
+				break;
+		}
+
+		/* Share the remaining reclaim budget with the cached pool. */
+		nr_freed = ion_page_pool_shrink(sys_heap->cached_pools[i],
+						gfp_mask, nr_to_scan);
+		nr_total += nr_freed;
+		if (!only_scan) {
+			nr_to_scan -= nr_freed;
+			if (nr_to_scan <= 0)
+				break;
+		}
 	}
 
 	return nr_total;
