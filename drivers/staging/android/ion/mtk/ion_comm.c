@@ -97,13 +97,15 @@ static int ion_comm_cache_pool(void *data)
 		if (cache_buffer == 0)
 			buffer->flags = 0;
 		buffer->size = req_cache_size;
-		ion_mm_heap_cache_allocate(ion_cam_heap,
-					   buffer,
-					   buffer->size,
-					   0,
-					   0);
-		IONMSG("%s push buffer to cam_pool\n", __func__);
-		ion_mm_heap_cache_free(buffer);
+		ret = ion_mm_heap_cache_allocate(ion_cam_heap,
+						 buffer,
+						 buffer->size,
+						 0,
+						 0);
+		if (!ret) {
+			IONMSG("%s push buffer to cam_pool\n", __func__);
+			ion_mm_heap_cache_free(buffer);
+		}
 		kfree(buffer);
 		buffer = NULL;
 

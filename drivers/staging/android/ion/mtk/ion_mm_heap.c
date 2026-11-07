@@ -2410,7 +2410,7 @@ int ion_mm_heap_cache_allocate(struct ion_heap *heap,
 	if (!info) {
 		IONMSG("%s err info, size %ld, remain %ld.\n",
 			__func__, size, size_remaining);
-		return -ENOMEM;
+		goto err;
 	}
 
 	table = kzalloc(sizeof(*table), GFP_KERNEL);
