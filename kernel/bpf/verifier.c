@@ -2196,6 +2196,17 @@ do_sim:
 	return !ret ? REASON_STACK : 0;
 }
 
+static void sanitize_mark_insn_seen(struct bpf_verifier_env *env)
+{
+	/*
+	 * Instructions visited only during speculative verification
+	 * must remain unseen so sanitize_dead_code() can still
+	 * rewrite instructions unreachable in the normal domain.
+	 */
+	if (!env->cur_state->speculative)
+		env->insn_aux_data[env->insn_idx].seen = true;
+}
+
 static int sanitize_err(struct bpf_verifier_env *env,
 			const struct bpf_insn *insn, int reason,
 			const struct bpf_reg_state *off_reg,
@@ -4252,7 +4263,7 @@ static int do_check(struct bpf_verifier_env *env)
 			return err;
 
 		regs = cur_regs(env);
-		env->insn_aux_data[env->insn_idx].seen = true;
+		sanitize_mark_insn_seen(env);
 		if (class == BPF_ALU || class == BPF_ALU64) {
 			err = check_alu_op(env, insn);
 			if (err)
@@ -4451,7 +4462,7 @@ process_bpf_exit:
 					return err;
 
 				env->insn_idx++;
-				env->insn_aux_data[env->insn_idx].seen = true;
+				sanitize_mark_insn_seen(env);
 			} else {
 				verbose("invalid BPF_LD mode\n");
 				return -EINVAL;
