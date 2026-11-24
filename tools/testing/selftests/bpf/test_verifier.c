@@ -2158,6 +2158,19 @@ static struct bpf_test tests[] = {
 		.result = ACCEPT,
 	},
 	{
+		"speculative JEQ with known constant",
+		.insns = {
+			BPF_MOV64_IMM(BPF_REG_7, 0),
+			BPF_MOV64_REG(BPF_REG_0, BPF_REG_7),
+			BPF_JMP_IMM(BPF_JEQ, BPF_REG_0, 0, 1),
+			BPF_LDX_MEM(BPF_DW, BPF_REG_0, BPF_REG_7, 0),
+			BPF_EXIT_INSN(),
+		},
+		.errstr_unpriv = "R7 invalid mem access 'inv'",
+		.result_unpriv = REJECT,
+		.result = ACCEPT,
+	},
+	{
 		"unpriv: partial copy of pointer",
 		.insns = {
 			BPF_MOV32_REG(BPF_REG_1, BPF_REG_10),
