@@ -511,7 +511,13 @@ static int copy_verifier_state(struct bpf_verifier_state *dst,
 	if (err)
 		return err;
 	memcpy(dst, src, offsetof(struct bpf_verifier_state, allocated_stack));
-	return copy_stack_state(dst, src);
+       err = copy_stack_state(dst, src);
+       if (err)
+               return err;
+
+       dst->speculative = src->speculative;
+
+       return 0;
 }
 
 static int pop_stack(struct bpf_verifier_env *env, int *prev_insn_idx,
@@ -556,12 +562,17 @@ static struct bpf_verifier_state *push_stack(struct bpf_verifier_env *env,
 	elem->insn_idx = insn_idx;
 	elem->prev_insn_idx = prev_insn_idx;
 	elem->next = env->head;
-	elem->st.speculative |= speculative;
 	env->head = elem;
 	env->stack_size++;
 	err = copy_verifier_state(&elem->st, cur);
 	if (err)
 		goto err;
+
+       /* Preserve speculative ancestry and mark explicitly speculative
+        * branches.
+        */
+       elem->st.speculative |= speculative;
+
 	if (env->stack_size > BPF_COMPLEXITY_LIMIT_STACK) {
 		verbose("BPF program is too complex\n");
 		goto err;
@@ -2107,6 +2118,27 @@ struct bpf_sanitize_info {
 	bool mask_to_left;
 };
 
+static struct bpf_verifier_state *
+sanitize_speculative_path(struct bpf_verifier_env *env,
+			  const struct bpf_insn *insn,
+			  u32 next_idx, u32 curr_idx)
+{
+	struct bpf_verifier_state *branch;
+	struct bpf_reg_state *regs;
+
+	branch = push_stack(env, next_idx, curr_idx, true);
+	if (branch && insn) {
+		regs = branch->regs;
+		if (BPF_SRC(insn->code) == BPF_K) {
+			mark_reg_unknown(regs, insn->dst_reg);
+		} else if (BPF_SRC(insn->code) == BPF_X) {
+			mark_reg_unknown(regs, insn->dst_reg);
+			mark_reg_unknown(regs, insn->src_reg);
+		}
+	}
+	return branch;
+}
+
 static int sanitize_ptr_alu(struct bpf_verifier_env *env,
 			    struct bpf_insn *insn,
 			    const struct bpf_reg_state *ptr_reg,
@@ -2190,7 +2222,8 @@ do_sim:
 		tmp = *dst_reg;
 		*dst_reg = *ptr_reg;
 	}
-	ret = push_stack(env, env->insn_idx + 1, env->insn_idx, true);
+	ret = sanitize_speculative_path(env, NULL,
+					env->insn_idx + 1, env->insn_idx);
 	if (!ptr_is_dst_reg && ret)
 		*dst_reg = tmp;
 	return !ret ? REASON_STACK : 0;
@@ -3365,15 +3398,26 @@ static int check_cond_jmp_op(struct bpf_verifier_env *env,
 	    tnum_equals_const(dst_reg->var_off, insn->imm)) {
 		if (opcode == BPF_JEQ) {
 			/* if (imm == imm) goto pc+off;
-			 * only follow the goto, ignore fall-through
+			 * follow the goto normally, but also simulate
+			 * the fall-through path under speculation.
 			 */
+			if (!env->allow_ptr_leaks &&
+			    !sanitize_speculative_path(env, insn,
+						       *insn_idx + 1,
+						       *insn_idx))
+				return -EFAULT;
 			*insn_idx += insn->off;
 			return 0;
 		} else {
 			/* if (imm != imm) goto pc+off;
-			 * only follow fall-through branch, since
-			 * that's where the program will go
+			 * follow fall-through normally, but also simulate
+			 * the taken path under speculation.
 			 */
+			if (!env->allow_ptr_leaks &&
+			    !sanitize_speculative_path(env, insn,
+						       *insn_idx + insn->off + 1,
+						       *insn_idx))
+				return -EFAULT;
 			return 0;
 		}
 	}
